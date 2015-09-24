@@ -1,0 +1,22 @@
+application: donate-backend 
+version: release
+runtime: python27
+threadsafe: true
+api_version: 1
+
+handlers:
+# Endpoints handler: this must be /_ah/spi for Endpoints, NOT /_ah/api!
+- url: /_ah/spi/.*
+  script: donate.application
+- url: /translations
+  static_dir: translations
+builtins:
+- remote_api: on
+#- url: /*
+#  script: main.app
+
+libraries:
+- name: pycrypto
+  version: latest
+- name: endpoints
+  version: 1.0
