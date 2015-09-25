@@ -502,7 +502,7 @@ class DonateApi(remote.Service):
         current_user = endpoints.get_current_user()
         if query.from_datastore is True:
             user_id = query.owner_key.get().user_id
-            if user_id == self.get_user_id(current_user):
+            if (user_id == self.get_user_id(current_user)) or query.owner_key.get().volunteer:
                 for blobkey in query.blobkeys:
                     gcs.delete(blobkey)
                 print(query.key.delete())
