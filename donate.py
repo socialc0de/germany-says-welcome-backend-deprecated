@@ -503,9 +503,7 @@ class DonateApi(remote.Service):
         if query.from_datastore is True:
             user_id = query.owner_key.get().user_id
             if (user_id == self.get_user_id(current_user)) or query.owner_key.get().volunteer:
-                for blobkey in query.blobkeys:
-                    gcs.delete(blobkey)
-                print(query.key.delete())
+                query.key.delete()
                 return query
             else:
                 raise endpoints.UnauthorizedException("You can only delete your own faqitems.")
