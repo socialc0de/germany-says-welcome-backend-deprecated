@@ -77,7 +77,7 @@ class User(EndpointsModel):
     address = ndb.StringProperty()
     interest = ndb.KeyProperty(Category, repeated=True)
     name = ndb.StringProperty(required=False)
-    volunteer = ndb.BooleanProperty(default=False)
+    is_volunteer = ndb.BooleanProperty(default=False)
     is_admin = ndb.BooleanProperty(default=False)
     #profile_image = ndb.BlobProperty(repeated=False, required=False)
     #profile_image_url = ndb.StringProperty(repeated=False, required=False)
@@ -154,36 +154,6 @@ class DonateApi(remote.Service):
             return False
         return False
 
-    @Offer.method(path='offer', http_method='POST', name='offer.create',user_required=True,
-        request_fields=('title', 'subtitle', 'description', 'categories', 'images', 'lat','lon', 'end_date'))
-    def OfferInsert(self, offer):
-        """ Created create offer"""
-        bucket_name = app_identity.get_default_gcs_bucket_name()
-        user = self.get_current_user()
-        offer.owner_key = user.key
-        urls = []
-        blobkeys = []
-        for image in offer.images:
-            if len(image) > 6*1024*1024:
-                for blobkey in blobkeys:
-                    gcs.delete(blobkey)
-                raise endpoints.BadRequestException("Max. image size is 6*1024*1024 bytes")
-            write_retry_params = gcs.RetryParams(backoff_factor=1.1)
-            filename = "/" + bucket_name + "/" +str(uuid.uuid4())
-            png = images.rotate(image, 0, output_encoding=images.PNG)
-            gcs_file = gcs.open(filename,'w',retry_params=write_retry_params,content_type='image/png',)
-            gcs_file.write(image)
-            gcs_file.close()
-            blobkey = blobstore.create_gs_key("/gs" + filename)
-            blobkeys.append(filename)
-            #url = images.get_serving_url("gs" + filename)
-            url = images.get_serving_url(blobkey)
-            urls.append(url)
-        offer.image_urls = urls
-        offer.blobkeys = blobkeys
-        del offer.images
-        offer.put()
-        return offer
     @Offer.method(path='offer', http_method='POST', name='offer.create',user_required=True,
         request_fields=('title', 'subtitle', 'description', 'categories', 'images', 'lat','lon', 'end_date'))
     def OfferInsert(self, offer):
@@ -329,13 +299,16 @@ class DonateApi(remote.Service):
             current_user = endpoints.get_current_user()
             email = current_user.email()
             if self.is_current_user_admin():
-                user.volunteer = True
+                user.is_volunteer = True
                 user.is_admin = True
             else:
-                user.volunteer = False
+                user.is_volunteer = False
                 user.is_admin = False
             user.put()
-        return user
+            print(user)
+            return user
+        else:
+            return users.get()
 
     @User.method(path='update_user', http_method='POST', name='user.update',user_required=True,
         request_fields=('address', 'im', 'interest'), response_fields=USER_FILTERED_FIELDS)
@@ -446,7 +419,7 @@ class DonateApi(remote.Service):
     def FAQItemUpdate(self, faqitem):
         """ Created create faqitem"""
         user = self.get_current_user()
-        if user.volunteer:
+        if user.is_volunteer:
             if faqitem.id != None:
                 item = FAQItem.get_by_id(faqitem.id)
                 if item is None:
@@ -502,7 +475,7 @@ class DonateApi(remote.Service):
         current_user = endpoints.get_current_user()
         if query.from_datastore is True:
             user_id = query.owner_key.get().user_id
-            if (user_id == self.get_user_id(current_user)) or query.owner_key.get().volunteer:
+            if (user_id == self.get_user_id(current_user)) or query.owner_key.get().is_volunteer:
                 query.key.delete()
                 return query
             else:
