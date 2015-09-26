@@ -36,6 +36,7 @@ VALID_CLIENTS = [WEB_CLIENT_ID, DEV_CLIENT_ID, endpoints.API_EXPLORER_CLIENT_ID,
 QUERY_LIMIT_DEFAULT = 25
 QUERY_LIMIT_MAX = 100
 OFFER_FILTERED_FIELDS = ("id", "title", "subtitle", "image_urls", "categories")
+MENTORING_FILTERED_FIELDS = ("id", "title", "image_url")
 USER_FILTERED_FIELDS = ("im", "address", "name")
 PREVIEW_WIDTH = 152
 PREVIEW_HEIGHT = 152
@@ -120,6 +121,26 @@ class Offer(EndpointsModel):
             cleaned_owner = User(name = owner.name, im = owner.im, interest = owner.interest)
             return cleaned_owner
 
+class MentoringRequest(EndpointsModel):
+    _message_fields_schema = ('id', 'title', 'description',
+        'image_url', 'lat','lon', 'requester', 'end_date', 'requester_key')
+    creation_date = ndb.DateTimeProperty(auto_now_add=True)
+    title = ndb.StringProperty(required=True)
+    description = ndb.StringProperty(required=True)
+    lat = LatLocationsFloatProperty(required=False)
+    lon = LonLocationsFloatProperty(required=False)
+    end_date = EndpointsDateTimeProperty(auto_now_add=False, required=True, string_format=DATETIME_STRING_FORMAT) # yyyy-mm-dd hh:mm
+    image = ndb.BlobProperty(repeated=False)
+    image_url = ndb.StringProperty(repeated=False)
+    blobkey = ndb.StringProperty(repeated=False)
+    bbox = ndb.StringProperty(required=False)
+    requester_key = ndb.KeyProperty(User)
+    @EndpointsAliasProperty(property_type=User.ProtoModel())
+    def requester(self):
+        if self.requester_key != None:
+            requester = self.requester_key.get()
+            cleaned_requester = User(name = requester.name, im = requester.im, interest = requester.interest)
+            return cleaned_requester
 class SearchRequest(messages.Message):
   query = messages.StringField(1)
   limit = messages.IntegerField(2)
@@ -509,4 +530,82 @@ class DonateApi(remote.Service):
 
         else:
             raise endpoints.BadRequestException("Search query missing")
+    @MentoringRequest.method(path='mentoringrequest', http_method='POST', name='mentoringrequest.create',user_required=True,
+        request_fields=('title', 'description', 'image', 'lat','lon', 'end_date'))
+    def MentoringRequestInsert(self, mentoringrequest):
+        """ Created create mentoringrequest"""
+        bucket_name = app_identity.get_default_gcs_bucket_name()
+        user = self.get_current_user()
+        mentoringrequest.requester_key = user.key
+        if mentoringrequest.image != None:
+            image = mentoringrequest.image
+            if len(image) > 6*1024*1024:
+                raise endpoints.BadRequestException("Max. image size is 6*1024*1024 bytes")
+            write_retry_params = gcs.RetryParams(backoff_factor=1.1)
+            filename = "/" + bucket_name + "/" +str(uuid.uuid4())
+            png = images.rotate(image, 0, output_encoding=images.PNG)
+            gcs_file = gcs.open(filename,'w',retry_params=write_retry_params,content_type='image/png',)
+            gcs_file.write(png)
+            gcs_file.close()
+            blobkey = blobstore.create_gs_key("/gs" + filename)
+            url = images.get_serving_url(blobkey)
+            mentoringrequest.image_url = url
+            print(url)
+            mentoringrequest.blobkey = filename
+            print(blobkey)
+        del mentoringrequest.image
+        mentoringrequest.put()
+        return mentoringrequest
+    @MentoringRequest.query_method(user_required=False, path='mentoringrequests_near', name='mentoringrequest.list_near',
+        query_fields=("bbox",'limit', 'order', 'pageToken'),
+        collection_fields=MENTORING_FILTERED_FIELDS,
+        limit_default=QUERY_LIMIT_DEFAULT,limit_max=QUERY_LIMIT_MAX)
+    def NearMentoringRequestList(self, data):
+        """Returns #limit MentoringRequests in bbox"""
+        if data.filters != None:
+            bbox = data.filters._FilterNode__value
+            bbox = bbox.split(",")
+            if bbox[0] != bbox[2] and bbox[1] != bbox[3]:
+                qry = MentoringRequest.query(ndb.AND(MentoringRequest.lon > float(bbox[0]), MentoringRequest.lon < float(bbox[2])))
+                qry.filter(MentoringRequest.end_date > datetime.now()).filter(ndb.AND(MentoringRequest.lat > float(bbox[1]),
+                    MentoringRequest.lat < float(bbox[3])))
+                return qry
+            else:
+                raise endpoints.BadRequestException("The area of the bbox needs to be larger than 0")
+        else:
+            raise endpoints.BadRequestException("bbox value is needed")
+
+    @MentoringRequest.query_method(user_required=True, path='mentoringrequests_by_user', name='mentoringrequest.byuser',
+        query_fields=("requester_key", "limit", 'pageToken'),
+        collection_fields=MENTORING_FILTERED_FIELDS,
+        limit_default=QUERY_LIMIT_DEFAULT,limit_max=QUERY_LIMIT_MAX)
+    def MentoringRequestByUser(self, query):
+        """Gets top #limit mentoringrequests by user"""
+        query = query.filter(MentoringRequest.end_date > datetime.now()).order(MentoringRequest.end_date)
+        return query
+
+    @MentoringRequest.method(http_method='GET', user_required=False, request_fields=('id',),
+                      path='mentoringrequest/{id}', name='mentoringrequest.get', response_fields=('id', 'title', 'description', 'image_url', 'lat','lon', 'requester', 'end_date'))
+    def MentoringRequestGet(self, mentoringrequest):
+        """ Gets mentoringrequest details by mentoringrequest id"""
+        if not mentoringrequest.from_datastore:
+            raise endpoints.NotFoundException('MentoringRequest not found.')
+        return mentoringrequest
+
+    @MentoringRequest.method(user_required=True, path='delete_mentoringrequest', name='mentoringrequest.delete',
+        request_fields=("id",), http_method="POST")
+    def DeleteMentoringRequest(self, query):
+        """Deletes mentoringrequest"""
+        current_user = endpoints.get_current_user()
+        if query.from_datastore is True:
+            user_id = query.requester_key.get().user_id
+            if user_id == self.get_user_id(current_user):
+                gcs.delete(query.blobkey)
+                print(query.key.delete())
+                return query
+            else:
+                raise endpoints.UnauthorizedException("You can only delete your own mentoringrequests.")
+        else:
+            raise endpoints.NotFoundException("MentoringRequest not found.")
+
 application = endpoints.api_server([DonateApi], restricted=False)

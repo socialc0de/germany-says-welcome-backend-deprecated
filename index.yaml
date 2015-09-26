@@ -10,6 +10,11 @@ indexes:
 # automatically uploaded to the admin console when you next deploy
 # your application using appcfg.py.
 
+- kind: MentoringRequest
+  properties:
+  - name: requester_key
+  - name: end_date
+
 - kind: Offer
   properties:
   - name: owner_key
