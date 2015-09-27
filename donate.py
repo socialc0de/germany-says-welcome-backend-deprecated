@@ -530,10 +530,11 @@ class DonateApi(remote.Service):
 
         else:
             raise endpoints.BadRequestException("Search query missing")
+
     @MentoringRequest.method(path='mentoringrequest', http_method='POST', name='mentoringrequest.create',user_required=True,
         request_fields=('title', 'description', 'image', 'lat','lon', 'end_date'))
     def MentoringRequestInsert(self, mentoringrequest):
-        """ Created create mentoringrequest"""
+        """ Create mentoringrequest"""
         bucket_name = app_identity.get_default_gcs_bucket_name()
         user = self.get_current_user()
         mentoringrequest.requester_key = user.key
@@ -556,24 +557,29 @@ class DonateApi(remote.Service):
         del mentoringrequest.image
         mentoringrequest.put()
         return mentoringrequest
-    @MentoringRequest.query_method(user_required=False, path='mentoringrequests_near', name='mentoringrequest.list_near',
+    @MentoringRequest.query_method(user_required=True, path='mentoringrequests_near', name='mentoringrequest.list_near',
         query_fields=("bbox",'limit', 'order', 'pageToken'),
         collection_fields=MENTORING_FILTERED_FIELDS,
         limit_default=QUERY_LIMIT_DEFAULT,limit_max=QUERY_LIMIT_MAX)
     def NearMentoringRequestList(self, data):
         """Returns #limit MentoringRequests in bbox"""
-        if data.filters != None:
-            bbox = data.filters._FilterNode__value
-            bbox = bbox.split(",")
-            if bbox[0] != bbox[2] and bbox[1] != bbox[3]:
-                qry = MentoringRequest.query(ndb.AND(MentoringRequest.lon > float(bbox[0]), MentoringRequest.lon < float(bbox[2])))
-                qry.filter(MentoringRequest.end_date > datetime.now()).filter(ndb.AND(MentoringRequest.lat > float(bbox[1]),
-                    MentoringRequest.lat < float(bbox[3])))
-                return qry
+        current_user = self.get_current_user();
+        if (current_user.is_volunteer or current_user.is_admin):
+            if data.filters != None:
+                bbox = data.filters._FilterNode__value
+                bbox = bbox.split(",")
+                if bbox[0] != bbox[2] and bbox[1] != bbox[3]:
+                    qry = MentoringRequest.query(ndb.AND(MentoringRequest.lon > float(bbox[0]), MentoringRequest.lon < float(bbox[2])))
+                    qry.filter(MentoringRequest.end_date > datetime.now()).filter(ndb.AND(MentoringRequest.lat > float(bbox[1]),
+                        MentoringRequest.lat < float(bbox[3])))
+                    return qry
+                else:
+                    raise endpoints.BadRequestException("The area of the bbox needs to be larger than 0")
             else:
-                raise endpoints.BadRequestException("The area of the bbox needs to be larger than 0")
+                raise endpoints.BadRequestException("bbox value is needed")
         else:
-            raise endpoints.BadRequestException("bbox value is needed")
+            raise endpoints.BadRequestException("Only volunteers can search MentoringRequests")
+
 
     @MentoringRequest.query_method(user_required=True, path='mentoringrequests_by_user', name='mentoringrequest.byuser',
         query_fields=("requester_key", "limit", 'pageToken'),
@@ -581,16 +587,25 @@ class DonateApi(remote.Service):
         limit_default=QUERY_LIMIT_DEFAULT,limit_max=QUERY_LIMIT_MAX)
     def MentoringRequestByUser(self, query):
         """Gets top #limit mentoringrequests by user"""
-        query = query.filter(MentoringRequest.end_date > datetime.now()).order(MentoringRequest.end_date)
-        return query
+        current_user = self.get_current_user();
+        if (current_user.is_admin):
+            query = query.filter(MentoringRequest.end_date > datetime.now()).order(MentoringRequest.end_date)
+            return query
+        else:
+            raise endpoints.BadRequestException("Only volunteers can search MentoringRequests")
 
-    @MentoringRequest.method(http_method='GET', user_required=False, request_fields=('id',),
+
+    @MentoringRequest.method(http_method='GET', user_required=True, request_fields=('id',),
                       path='mentoringrequest/{id}', name='mentoringrequest.get', response_fields=('id', 'title', 'description', 'image_url', 'lat','lon', 'requester', 'end_date'))
     def MentoringRequestGet(self, mentoringrequest):
         """ Gets mentoringrequest details by mentoringrequest id"""
-        if not mentoringrequest.from_datastore:
-            raise endpoints.NotFoundException('MentoringRequest not found.')
-        return mentoringrequest
+        current_user = self.get_current_user();
+        if (current_user.is_volunteer or current_user.is_admin):
+            if not mentoringrequest.from_datastore:
+                raise endpoints.NotFoundException('MentoringRequest not found.')
+            return mentoringrequest
+        else:
+            raise endpoints.BadRequestException("Only volunteers can search MentoringRequests")
 
     @MentoringRequest.method(user_required=True, path='delete_mentoringrequest', name='mentoringrequest.delete',
         request_fields=("id",), http_method="POST")
