@@ -80,10 +80,9 @@ class User(EndpointsModel):
     name = ndb.StringProperty(required=False)
     is_volunteer = ndb.BooleanProperty(default=False)
     is_admin = ndb.BooleanProperty(default=False)
-    #profile_image = ndb.BlobProperty(repeated=False, required=False)
-    #profile_image_url = ndb.StringProperty(repeated=False, required=False)
-    #profile_image_blobkey = ndb.StringProperty(repeated=False, required=False)
-
+    image = ndb.BlobProperty(repeated=False)
+    image_url = ndb.StringProperty(repeated=False)
+    blobkey = ndb.StringProperty(repeated=False)
 class FAQItem(EndpointsModel):
     _message_fields_schema = ('id','question','answer','language','answered','category')
     question = ndb.TextProperty(required=True)
@@ -297,6 +296,21 @@ class DonateApi(remote.Service):
         users = User.query(User.user_id == user_id)
         if users.count() == 0:
             user.user_id = user_id
+            if user.image != None:
+                image = user.image
+                if len(image) > 6*1024*1024:
+                    raise endpoints.BadRequestException("Max. image size is 6*1024*1024 bytes")
+                write_retry_params = gcs.RetryParams(backoff_factor=1.1)
+                filename = "/" + bucket_name + "/" +str(uuid.uuid4())
+                png = images.rotate(image, 0, output_encoding=images.PNG)
+                gcs_file = gcs.open(filename,'w',retry_params=write_retry_params,content_type='image/png',)
+                gcs_file.write(png)
+                gcs_file.close()
+                blobkey = blobstore.create_gs_key("/gs" + filename)
+                url = images.get_serving_url(blobkey)
+                user.image_url = url
+                user.blobkey = filename
+            del user.image
             """TODO: write better code; temp fix to get users name"""
             headers = {'Authorization': os.getenv('HTTP_AUTHORIZATION')}
             url = "https://www.googleapis.com/plus/v1/people/me"
@@ -345,6 +359,21 @@ class DonateApi(remote.Service):
             raise endpoints.BadRequestException("There no user with user id %s." % user_id)
         else:
             update_user = users.get()
+            if user.image != None:
+                image = user.image
+                if len(image) > 6*1024*1024:
+                    raise endpoints.BadRequestException("Max. image size is 6*1024*1024 bytes")
+                write_retry_params = gcs.RetryParams(backoff_factor=1.1)
+                filename = "/" + bucket_name + "/" +str(uuid.uuid4())
+                png = images.rotate(image, 0, output_encoding=images.PNG)
+                gcs_file = gcs.open(filename,'w',retry_params=write_retry_params,content_type='image/png',)
+                gcs_file.write(png)
+                gcs_file.close()
+                blobkey = blobstore.create_gs_key("/gs" + filename)
+                url = images.get_serving_url(blobkey)
+                update_user.image_url = url
+                update_user.blobkey = filename
+            del user.image
             update_user.address = user.address
             if user.im != None:
                 try:
