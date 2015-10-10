@@ -37,10 +37,10 @@ QUERY_LIMIT_DEFAULT = 25
 QUERY_LIMIT_MAX = 100
 OFFER_FILTERED_FIELDS = ("id", "title", "subtitle", "image_urls", "categories", "lat", "lon")
 MENTORING_FILTERED_FIELDS = ("id", "title", "image_url")
-USER_FILTERED_FIELDS = ("im", "address", "name")
+USER_FILTERED_FIELDS = ("im", "address", "name", "image_url")
 PREVIEW_WIDTH = 152
 PREVIEW_HEIGHT = 152
-
+BUCKET_NAME = app_identity.get_default_gcs_bucket_name()
 # hardcoded admins, useful for local development
 admins = []
 
@@ -83,6 +83,7 @@ class User(EndpointsModel):
     image = ndb.BlobProperty(repeated=False)
     image_url = ndb.StringProperty(repeated=False)
     blobkey = ndb.StringProperty(repeated=False)
+
 class FAQItem(EndpointsModel):
     _message_fields_schema = ('id','question','answer','language','answered','category')
     question = ndb.TextProperty(required=True)
@@ -178,7 +179,6 @@ class DonateApi(remote.Service):
         request_fields=('title', 'subtitle', 'description', 'categories', 'images', 'lat','lon', 'end_date'))
     def OfferInsert(self, offer):
         """ Created create offer"""
-        bucket_name = app_identity.get_default_gcs_bucket_name()
         user = self.get_current_user()
         offer.owner_key = user.key
         urls = []
@@ -189,7 +189,7 @@ class DonateApi(remote.Service):
                     gcs.delete(blobkey)
                 raise endpoints.BadRequestException("Max. image size is 6*1024*1024 bytes")
             write_retry_params = gcs.RetryParams(backoff_factor=1.1)
-            filename = "/" + bucket_name + "/" +str(uuid.uuid4())
+            filename = "/" + BUCKET_NAME + "/" +str(uuid.uuid4())
             png = images.rotate(image, 0, output_encoding=images.PNG)
             gcs_file = gcs.open(filename,'w',retry_params=write_retry_params,content_type='image/png',)
             gcs_file.write(image)
@@ -301,7 +301,7 @@ class DonateApi(remote.Service):
                 if len(image) > 6*1024*1024:
                     raise endpoints.BadRequestException("Max. image size is 6*1024*1024 bytes")
                 write_retry_params = gcs.RetryParams(backoff_factor=1.1)
-                filename = "/" + bucket_name + "/" +str(uuid.uuid4())
+                filename = "/" + BUCKET_NAME + "/" +str(uuid.uuid4())
                 png = images.rotate(image, 0, output_encoding=images.PNG)
                 gcs_file = gcs.open(filename,'w',retry_params=write_retry_params,content_type='image/png',)
                 gcs_file.write(png)
@@ -346,7 +346,7 @@ class DonateApi(remote.Service):
             return users.get()
 
     @User.method(path='update_user', http_method='POST', name='user.update',user_required=True,
-        request_fields=('address', 'im', 'interest'), response_fields=USER_FILTERED_FIELDS)
+        request_fields=('address', 'im', 'interest', 'image'), response_fields=USER_FILTERED_FIELDS)
     def UserUpdate(self, user):
         """ Updates informations about the user """
         current_user = endpoints.get_current_user()
@@ -364,7 +364,7 @@ class DonateApi(remote.Service):
                 if len(image) > 6*1024*1024:
                     raise endpoints.BadRequestException("Max. image size is 6*1024*1024 bytes")
                 write_retry_params = gcs.RetryParams(backoff_factor=1.1)
-                filename = "/" + bucket_name + "/" +str(uuid.uuid4())
+                filename = "/" + BUCKET_NAME + "/" +str(uuid.uuid4())
                 png = images.rotate(image, 0, output_encoding=images.PNG)
                 gcs_file = gcs.open(filename,'w',retry_params=write_retry_params,content_type='image/png',)
                 gcs_file.write(png)
@@ -564,7 +564,7 @@ class DonateApi(remote.Service):
         request_fields=('title', 'description', 'image', 'lat','lon', 'end_date'))
     def MentoringRequestInsert(self, mentoringrequest):
         """ Create mentoringrequest"""
-        bucket_name = app_identity.get_default_gcs_bucket_name()
+
         user = self.get_current_user()
         mentoringrequest.requester_key = user.key
         if mentoringrequest.image != None:
@@ -572,7 +572,7 @@ class DonateApi(remote.Service):
             if len(image) > 6*1024*1024:
                 raise endpoints.BadRequestException("Max. image size is 6*1024*1024 bytes")
             write_retry_params = gcs.RetryParams(backoff_factor=1.1)
-            filename = "/" + bucket_name + "/" +str(uuid.uuid4())
+            filename = "/" + BUCKET_NAME + "/" +str(uuid.uuid4())
             png = images.rotate(image, 0, output_encoding=images.PNG)
             gcs_file = gcs.open(filename,'w',retry_params=write_retry_params,content_type='image/png',)
             gcs_file.write(png)
