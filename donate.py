@@ -64,13 +64,32 @@ class Category(EndpointsModel):
     @EndpointsAliasProperty()
     def id(self):
         return self.key.urlsafe()
+
 class FAQCategory(EndpointsModel):
     name = ndb.StringProperty(required=True)
     description = ndb.TextProperty(required=True)
-    image = ndb.BlobProperty()
-    @EndpointsAliasProperty()
+    image = ndb.BlobProperty(repeated=False)
+    image_url = ndb.StringProperty(repeated=False)
+    blobkey = ndb.StringProperty(repeated=False)
+    def IdSet(self, value):
+        # By default, the property "id" assumes the "id" will be an integer in a
+        # simple key -- e.g. ndb.Key(MyModel, 10) -- which is the default behavior
+        # if no key is set. Instead, we wish to use a string value as the "id" here,
+        # so first check if the value being set is a string.
+        if not isinstance(value, basestring):
+          raise TypeError('ID must be a string.')
+        # We call UpdateFromKey, which each of EndpointsModel.IdSet and
+        # EndpointsModel.EntityKeySet use, to update the current entity using a
+        # datastore key. This method sets the key on the current entity, attempts to
+        # retrieve a corresponding entity from the datastore and then patch in any
+        # missing values if an entity is found in the datastore.
+        key = ndb.Key(urlsafe=value)
+        print(key)
+        self.UpdateFromKey(ndb.Key(urlsafe=value))
+    @EndpointsAliasProperty(setter=IdSet)
     def id(self):
-        return self.key.urlsafe()
+        if self.key is not None:
+            return self.key.urlsafe()
 
 class User(EndpointsModel):
     user_id = ndb.StringProperty(indexed=True)
@@ -447,6 +466,40 @@ class DonateApi(remote.Service):
     def FAQCategoryList(self, query):
         """Returns all categories"""
         return query
+
+    @FAQCategory.method(path='faqcat_update', http_method='POST', name='faqcat.update',user_required=True,
+        request_fields=('id','image'))
+    def FAQCategoryUpdate(self, faqcat):
+        """ update faqcat"""
+        if self.is_current_user_admin():
+            print(faqcat.id)
+            if faqcat.id != None:
+                item = ndb.Key(urlsafe=faqcat.id).get()
+                if item is None:
+                    raise endpoints.BadRequestException("FAQCategory not found")
+                else:
+                    if faqcat.image != None:
+                        image = faqcat.image
+                        if len(image) > 6*1024*1024:
+                            raise endpoints.BadRequestException("Max. image size is 6*1024*1024 bytes")
+                        write_retry_params = gcs.RetryParams(backoff_factor=1.1)
+                        filename = "/" + BUCKET_NAME + "/" +str(uuid.uuid4())
+                        png = images.rotate(image, 0, output_encoding=images.PNG)
+                        gcs_file = gcs.open(filename,'w',retry_params=write_retry_params,content_type='image/png',)
+                        gcs_file.write(png)
+                        gcs_file.close()
+                        blobkey = blobstore.create_gs_key("/gs" + filename)
+                        url = images.get_serving_url(blobkey)
+                        item.image_url = url
+                        item.blobkey = filename
+                    del faqcat.image
+                    item.put()
+                    return item
+            else:
+                raise endpoints.BadRequestException("ID missing")
+        else:
+            raise endpoints.UnauthorizedException("Only Volunteers users can update FAQCategory. \
+                Contact donate@ca.pajowu.de for more information.")
 
     @FAQItem.method(path='faqitem/create', http_method='POST', name='faqitem.create',user_required=True,
         request_fields=('question','answer','language','answered','category'))
