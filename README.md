@@ -1,5 +1,5 @@
 # Germany Says Welcome Backend for Google App Engine
-
+# THIS VERSION IST DEPRECATED
 ## Installation
 
 Install all requirements from requirements.txt into lib/
